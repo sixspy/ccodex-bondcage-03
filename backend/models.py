@@ -34,6 +34,8 @@ class ReleaseIn(BaseModel):
     cage_id: int
     amount: float | None = None
     payee: str | None = None
+    tail: bool = False
+    tail_mode: str | None = None
 
 
 class ForfeitIn(BaseModel):

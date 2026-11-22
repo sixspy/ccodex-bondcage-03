@@ -1,0 +1,33 @@
+[
+  {
+    "party_key": "P-TAIL",
+    "party_name": "尾程建工有限公司",
+    "balance": 60000.0,
+    "frozen": 60000.0,
+    "status": "正常",
+    "created_at": "2026-11-10T09:00:00",
+    "deposit_memo": "事故夹具开户入金",
+    "cage_code": "CG-P-TAIL-001",
+    "contract_no": "HT-2026-1118",
+    "amount": 100000.0,
+    "available": 60000.0,
+    "generation": 1,
+    "status": "部分解笼",
+    "beneficiary": "环城路桥业主办",
+    "cage_created_at": "2026-11-12T10:00:00",
+    "frozen_at": "2026-11-12T10:00:00",
+    "attestation": {
+      "outcome": "通过",
+      "evidence": "主体工程核验通过，留尾款待拨付",
+      "officer": "admin",
+      "created_at": "2026-11-16T15:00:00"
+    },
+    "first_release": {
+      "amount": 40000.0,
+      "payee": "环城路桥业主办",
+      "release_ref": "REL-CG-P-TAIL-001-g1-SEED01",
+      "created_at": "2026-11-18T11:00:00"
+    },
+    "tail_outstanding": 60000.0
+  }
+]

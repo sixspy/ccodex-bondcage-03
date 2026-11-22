@@ -35,6 +35,11 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    # WAL：多连接并发写时由 SQLite 写锁串行化，配合 BEGIN IMMEDIATE 抢笼锁
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.DatabaseError:
+        pass
     return conn
 
 
@@ -97,6 +102,8 @@ CREATE TABLE IF NOT EXISTS releases(
   cage_generation INTEGER NOT NULL,
   status TEXT NOT NULL,
   release_ref TEXT NOT NULL,
+  is_tail INTEGER NOT NULL DEFAULT 0,
+  tail_mode TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY(cage_id) REFERENCES cages(id)
 );
@@ -269,14 +276,115 @@ def seed_attest_samples(conn: sqlite3.Connection) -> None:
         # 不预置通过/违约结论，只保证表可查；实际核验由业务动作写入
 
 
+def seed_tail_incidents(conn: sqlite3.Connection) -> None:
+    """种子事故夹具：核验通过后已做一笔部分拨付、仍留可用额的笼（待清尾款）。"""
+    for row in _load_json("tail_incidents.json"):
+        party = row["party_key"]
+        acct = conn.execute(
+            "SELECT id FROM bond_accounts WHERE party_key=?", (party,)
+        ).fetchone()
+        if not acct:
+            conn.execute(
+                """INSERT INTO bond_accounts(party_key,party_name,balance,frozen,status,created_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    party,
+                    row["party_name"],
+                    float(row["balance"]),
+                    float(row["frozen"]),
+                    row.get("status", "正常"),
+                    row["created_at"],
+                ),
+            )
+            conn.execute(
+                """INSERT INTO deposit_ledger(party_key,amount,memo,created_at,actor)
+                   VALUES (?,?,?,?,?)""",
+                (
+                    party,
+                    float(row["balance"]),
+                    row.get("deposit_memo", "事故夹具种子入金"),
+                    row["created_at"],
+                    "seed",
+                ),
+            )
+        cage = conn.execute(
+            "SELECT id FROM cages WHERE cage_code=?", (row["cage_code"],)
+        ).fetchone()
+        if cage:
+            continue
+        amount = float(row["amount"])
+        available = float(row["available"])
+        gen = int(row.get("generation", 1))
+        cur = conn.execute(
+            """INSERT INTO cages(cage_code,party_key,contract_no,amount,available,
+               generation,status,beneficiary,created_at,frozen_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                row["cage_code"],
+                party,
+                row["contract_no"],
+                amount,
+                available,
+                gen,
+                row.get("status", "部分解笼"),
+                row["beneficiary"],
+                row["cage_created_at"],
+                row.get("frozen_at"),
+            ),
+        )
+        cage_id = cur.lastrowid
+        att = row.get("attestation")
+        if att:
+            conn.execute(
+                """INSERT INTO attestations(cage_id,outcome,evidence,attest_gen,officer,created_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    cage_id,
+                    att["outcome"],
+                    att.get("evidence", ""),
+                    gen,
+                    att.get("officer", "seed"),
+                    att["created_at"],
+                ),
+            )
+        rel = row.get("first_release")
+        if rel:
+            conn.execute(
+                """INSERT INTO releases(cage_id,amount,payee,cage_generation,status,release_ref,created_at)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (
+                    cage_id,
+                    float(rel["amount"]),
+                    rel.get("payee", row["beneficiary"]),
+                    gen,
+                    "已拨付",
+                    rel["release_ref"],
+                    rel["created_at"],
+                ),
+            )
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate_schema(conn)
         seed_users(conn)
         seed_bonds(conn)
         seed_cages(conn)
         seed_attest_samples(conn)
+        seed_tail_incidents(conn)
         conn.commit()
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """对已存在的本机库做轻量加列，新增库由 SCHEMA 直接建齐。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(releases)").fetchall()}
+    if "is_tail" not in cols:
+        conn.execute("ALTER TABLE releases ADD COLUMN is_tail INTEGER NOT NULL DEFAULT 0")
+    if "tail_mode" not in cols:
+        conn.execute(
+            "ALTER TABLE releases ADD COLUMN tail_mode TEXT"
+        )
 
 
 def dashboard_stats(conn: sqlite3.Connection) -> dict:

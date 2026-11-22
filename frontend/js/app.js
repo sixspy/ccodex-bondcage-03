@@ -136,6 +136,9 @@ createApp({
         (c) => c.status === "核验通过" || c.status === "部分解笼"
       )
     );
+    const selectedReleaseCage = computed(() =>
+      cages.value.find((c) => c.id === releaseForm.value.cage_id) || null
+    );
     const failCages = computed(() =>
       cages.value.filter(
         (c) => c.status === "核验违约" || c.status === "部分罚没"
@@ -314,11 +317,33 @@ createApp({
       clearFlash();
       try {
         if (!releaseForm.value.cage_id) throw new Error("请选择笼");
-        const payload = { cage_id: releaseForm.value.cage_id };
+        const payload = { cage_id: releaseForm.value.cage_id, tail: false };
         if (releaseForm.value.amount) payload.amount = releaseForm.value.amount;
         if (releaseForm.value.payee) payload.payee = releaseForm.value.payee;
         const row = await api.release(payload);
         flashOk(`拨付成功 ${row.release_ref}`);
+        await refresh();
+      } catch (e) {
+        flashErr(e);
+      }
+    }
+
+    async function doTailRelease() {
+      clearFlash();
+      try {
+        if (!releaseForm.value.cage_id) throw new Error("请选择笼");
+        const cage = selectedReleaseCage.value;
+        if (!cage || cage.status !== "部分解笼") {
+          throw new Error("尾款清尾仅适用于部分解笼后仍留可用额的笼");
+        }
+        const payload = {
+          cage_id: releaseForm.value.cage_id,
+          tail: true,
+          tail_mode: "甲",
+        };
+        if (releaseForm.value.payee) payload.payee = releaseForm.value.payee;
+        const row = await api.release(payload);
+        flashOk(`尾款已结清 ${row.release_ref}，笼可用归零`);
         await refresh();
       } catch (e) {
         flashErr(e);
@@ -427,6 +452,7 @@ createApp({
       splitForm,
       frozenCages,
       passCages,
+      selectedReleaseCage,
       failCages,
       login,
       logout,
@@ -441,6 +467,7 @@ createApp({
       selectCage,
       doAttest,
       doRelease,
+      doTailRelease,
       doForfeit,
       loadReconcile,
       loadProof,
